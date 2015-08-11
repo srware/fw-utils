@@ -1,0 +1,146 @@
+#!/usr/bin/python
+
+#
+# Written by Scott Ware
+#
+# Version 0.0.1
+#
+
+import gobject
+import os
+import io
+import sys
+import time
+import json
+import subprocess
+import urllib2
+import urlparse
+import tarfile
+import tempfile
+
+def is_supported_platform():
+    	platform_file = open('/sys/class/dmi/id/board_name', 'r')
+    	platform = platform_file.readline()
+    	platform_file.close()
+	
+	if platform is "BODEGA BAY" or "SALT BAY":
+    		return True
+
+    	return False
+
+def download_file(url):
+	try:
+		u = urllib2.urlopen(url)
+	except IOError:
+		print "Error: Unable to obtain update file. Check file path or url is valid and ensure system is online."
+		return None
+
+    	scheme, netloc, path, query, fragment = urlparse.urlsplit(url)
+    	f = tempfile.NamedTemporaryFile(delete=False)
+
+        meta = u.info()
+        meta_func = meta.getheaders if hasattr(meta, 'getheaders') else meta.get_all
+        meta_length = meta_func("Content-Length")
+        file_size = None
+
+        if meta_length:
+            	file_size = int(meta_length[0])
+
+        file_size_dl = 0
+        block_sz = 8192
+
+	try:
+        	while True:
+            		buffer = u.read(block_sz)
+            		if not buffer:
+                		break
+
+            		file_size_dl += len(buffer)
+            		f.write(buffer)
+
+            		status = "{0:16}".format(file_size_dl)
+
+            		if file_size:
+				status += "/{}".format(file_size)
+                		status += "   [{0:6.2f}%]".format(file_size_dl * 100 / file_size)
+
+            		sys.stdout.write("\rDownloading Update File: " + status)
+			sys.stdout.flush()
+
+	except IOError as error:
+		print error.message
+
+	return f.name
+
+def print_usage():
+	print "\nUsage:\n"
+	print "fw-utils update [URL\FILEPATH]: Flash an update image to the device."
+	print "fw-utils restore: Restore the device to factory defaults."
+	print "fw-utils help: Prints this usage guide."
+	sys.exit(1)
+
+if __name__ == '__main__':
+	if len(sys.argv) == 2 and sys.argv[1] == "help":
+		print_usage()
+
+	if (len(sys.argv) < 2):
+		print "Please specify a command!"
+		print_usage()
+		
+	# Check Platform
+	if not is_supported_platform():
+		print "Error: This is not a supported platform!"
+		sys.exit(1)
+
+	os.system('clear')
+
+	#
+	# Update
+	#
+
+	if sys.argv[1] == "update":
+		
+		print "\nUpdate Device Firmware\n=====================\n"
+
+		# Check path argument
+		if (len(sys.argv) < 3):
+			print "Error: No URL or local file path specified!"
+			print_usage()
+
+		# Check URL/File
+		if os.path.isfile(sys.argv[2]):
+			update_path = sys.argv[2]
+		else:
+			update_path = download_file(sys.argv[2])
+			
+			if update_path is None:
+				sys.exit(1)
+			
+		print "\n" + update_path
+
+		# Make sure update partition is not in use
+		subprocess.call("modprobe -r g_multi", shell=True)
+
+		# Create mount point if it doesn't exist
+		if not os.path.exists('/update'):
+    			os.makedirs('/update')
+
+		# Mount update partition
+		result = subprocess.call("mount -o loop,offset=1048576 /dev/disk/by-partlabel/update /update", shell=True)
+		if(result != 0):
+			print "Error: Unable to mount update partition."
+			sys.exit(1)
+
+		# Unmount update partition
+		result = subprocess.call("umount /update", shell=True)
+		if(result != 0):
+			print "Error: Unable to unmount update partition."
+			sys.exit(1)
+		
+
+	#
+	# Recovery
+	#
+
+	#elif sys.argv[1] == "restore":
+

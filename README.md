@@ -1,2 +1,2 @@
-# fw-update
-FIrmware update utility for Intel IoT devices.
+# Firmware Utilities
+Firmware utilities for Intel IoT devices.
