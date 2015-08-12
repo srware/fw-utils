@@ -17,6 +17,13 @@ import urllib2
 import urlparse
 import tarfile
 import tempfile
+import shutil
+
+MOUNT_POINT = "/update"
+UPDATE_DESTINATION = "/update/recovery"
+BACKUP_DESTINATION = "/update/recovery/backup"
+
+UPDATE_FORMAT = ['image-name.txt', 'rootfs.tar.bz2', 'boot.hddimg', 'u-boot.bin', 'u-boot.env']
 
 def is_supported_platform():
     	platform_file = open('/sys/class/dmi/id/board_name', 'r')
@@ -31,7 +38,7 @@ def is_supported_platform():
 def download_file(url):
 	try:
 		u = urllib2.urlopen(url)
-	except IOError:
+	except (IOError, ValueError) as error:
 		print "Error: Unable to obtain update file. Check file path or url is valid and ensure system is online."
 		return None
 
@@ -72,6 +79,10 @@ def download_file(url):
 
 	return f.name
 
+def unmount_update_filesystem():
+	if os.path.ismount(MOUNT_POINT):
+		subprocess.call("umount " + MOUNT_POINT, shell=True)
+
 def print_usage():
 	print "\nUsage:\n"
 	print "fw-utils update [URL\FILEPATH]: Flash an update image to the device."
@@ -100,7 +111,7 @@ if __name__ == '__main__':
 
 	if sys.argv[1] == "update":
 		
-		print "\nUpdate Device Firmware\n=====================\n"
+		print "\nUpdate Device Firmware\n=======================\n"
 
 		# Check path argument
 		if (len(sys.argv) < 3):
@@ -109,33 +120,85 @@ if __name__ == '__main__':
 
 		# Check URL/File
 		if os.path.isfile(sys.argv[2]):
-			update_path = sys.argv[2]
+			update_path = os.path.abspath(sys.argv[2])
 		else:
 			update_path = download_file(sys.argv[2])
 			
 			if update_path is None:
 				sys.exit(1)
+
+		print "Checking update file..."
 			
-		print "\n" + update_path
+		# Check we are working with a valid update file
+		if not tarfile.is_tarfile(update_path):
+			print "Error: This is not a valid update file!"
+			sys.exit(1)
+
+		# Load our update file		
+		update_file = tarfile.open(name=update_path)
+
+		# Check contents of update file are valid
+		if cmp(update_file.getnames(), UPDATE_FORMAT) != 0:
+			print "Error: This is not a valid update file!"
+			update_file.close()
+			sys.exit(1)
 
 		# Make sure update partition is not in use
 		subprocess.call("modprobe -r g_multi", shell=True)
 
 		# Create mount point if it doesn't exist
-		if not os.path.exists('/update'):
-    			os.makedirs('/update')
+		if not os.path.exists(MOUNT_POINT):
+    			os.makedirs(MOUNT_POINT)
+		# Make sure the update partition is not mounted
+		else:
+			unmount_update_filesystem()
 
 		# Mount update partition
-		result = subprocess.call("mount -o loop,offset=1048576 /dev/disk/by-partlabel/update /update", shell=True)
+		result = subprocess.call("mount -o loop,offset=1048576 /dev/disk/by-partlabel/update " + MOUNT_POINT, shell=True)
 		if(result != 0):
 			print "Error: Unable to mount update partition."
+			update_file.close()
 			sys.exit(1)
 
-		# Unmount update partition
-		result = subprocess.call("umount /update", shell=True)
+		# Create update directory if it doesn't exist
+		if not os.path.exists(UPDATE_DESTINATION):
+    			os.makedirs(UPDATE_DESTINATION)
+
+		# Create backup if necessary
+		if len(os.listdir(UPDATE_DESTINATION)) > 0:
+
+			print "Backing up current image files..."
+			
+			# Create backup directory
+			if not os.path.exists(BACKUP_DESTINATION):
+    				os.makedirs(BACKUP_DESTINATION)
+
+			backup_files = os.listdir(UPDATE_DESTINATION)
+			for file_name in backup_files:
+    				full_file_name = os.path.join(UPDATE_DESTINATION, file_name)
+    				if (os.path.isfile(full_file_name)):
+        				shutil.copy(full_file_name, BACKUP_DESTINATION)
+
+		# Extract update file
+		print "Extracting update files..."
+		update_file.extractall(path=UPDATE_DESTINATION)
+		
+		# Set system to flash image on reboot
+		result = subprocess.call("fw_setenv bootargs_mode recovery", shell=True)
 		if(result != 0):
-			print "Error: Unable to unmount update partition."
+			print "Error: Unable to configure device to flash new image."
+			update_file.close()
+			unmount_update_filesystem()
 			sys.exit(1)
+			
+		update_file.close()
+		unmount_update_filesystem()
+
+		# Reboot device
+		print "\nThe device will now reboot and begin flashing the new image."
+		print "** DO NOT unplug or disturb the device until flashing is complete **"
+		time.sleep(5)
+		os.system("reboot")
 		
 
 	#
