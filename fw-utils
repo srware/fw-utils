@@ -25,6 +25,23 @@ BACKUP_DESTINATION = "/update/recovery/backup"
 
 UPDATE_FORMAT = ['image-name.txt', 'rootfs.tar.bz2', 'boot.hddimg', 'u-boot.bin', 'u-boot.env']
 
+def verify(message):
+	print "\n" + message
+	verify = raw_input("[Y or N]" + ": ")
+  	
+	if verify == "Y" or verify == "y":
+    		return True
+  	elif verify == "N" or verify == "n":
+    		return False
+  	else:
+    		while 1:
+      			verify = raw_input("\nPlease enter either [Y or N]: ")
+
+      			if verify == "Y" or verify == "y":
+        			return True
+      			elif verify == "N" or verify == "n":
+        			return False
+
 def is_supported_platform():
     	platform_file = open('/sys/class/dmi/id/board_name', 'r')
     	platform = platform_file.readline()
@@ -79,14 +96,58 @@ def download_file(url):
 
 	return f.name
 
-def unmount_update_filesystem():
+def get_update_file():
+	dirlist = os.listdir(MOUNT_POINT)
+
+	# Browse update partition for valid update file
+	for file_name in dirlist:
+		full_file_name = os.path.join(MOUNT_POINT, file_name)
+    		if (os.path.isfile(full_file_name)):
+			if tarfile.is_tarfile(full_file_name):
+				return full_file_name
+
+	return None
+
+def is_backup_available():
+	# Check backup directory exists
+	if not os.path.exists(BACKUP_DESTINATION):
+		return False
+	
+	# Check backup directory is not empty
+	if not os.listdir(BACKUP_DESTINATION):
+		return False
+
+	# Check files exist
+   	backup_files = os.listdir(BACKUP_DESTINATION)
+	if cmp(backup_files, UPDATE_FORMAT) != 0:
+		return False
+
+	return True
+	
+def mount_update_partition():
+	# Create mount point if it doesn't exist
+	if not os.path.exists(MOUNT_POINT):
+    		os.makedirs(MOUNT_POINT)
+	# Make sure the update partition is not mounted
+	else:
+		unmount_update_partition()
+
+	# Mount update partition
+	result = subprocess.call("mount -o loop,offset=1048576 /dev/disk/by-partlabel/update " + MOUNT_POINT, shell=True)
+	if(result != 0):
+		return False
+
+	return True
+
+def unmount_update_partition():
 	if os.path.ismount(MOUNT_POINT):
 		subprocess.call("umount " + MOUNT_POINT, shell=True)
 
 def print_usage():
 	print "\nUsage:\n"
-	print "fw-utils update [URL\FILEPATH]: Flash an update image to the device."
+	print "fw-utils update [URL\FILEPATH]: Flash an update image to the device. If no url/path is specified the update partition will be scanned for update files."
 	print "fw-utils restore: Restore the device to factory defaults."
+	print "fw-utils revert: Flash the previous image back onto the device."
 	print "fw-utils help: Prints this usage guide."
 	sys.exit(1)
 
@@ -113,18 +174,26 @@ if __name__ == '__main__':
 		
 		print "\nUpdate Device Firmware\n=======================\n"
 
-		# Check path argument
+		# Mount update partition
+		if not mount_update_partition():
+			print "\nError: Unable to mount update partition.\n"
+			sys.exit(1)
+
+		# Check for url/path argument
 		if (len(sys.argv) < 3):
-			print "Error: No URL or local file path specified!"
-			print_usage()
+			update_path = get_update_file()
+			if update_path is None:
+				print "\nError: No update file found or url/path specified!\n"
+				unmount_update_partition()
+				sys.exit(1)
 
 		# Check URL/File
-		if os.path.isfile(sys.argv[2]):
+		elif os.path.isfile(sys.argv[2]):
 			update_path = os.path.abspath(sys.argv[2])
 		else:
 			update_path = download_file(sys.argv[2])
-			
 			if update_path is None:
+				unmount_update_partition()
 				sys.exit(1)
 
 		print "Checking update file..."
@@ -139,25 +208,16 @@ if __name__ == '__main__':
 
 		# Check contents of update file are valid
 		if cmp(update_file.getnames(), UPDATE_FORMAT) != 0:
-			print "Error: This is not a valid update file!"
+			print "\nError: This is not a valid update file!\n"
 			update_file.close()
+			unmount_update_partition()
 			sys.exit(1)
 
-		# Make sure update partition is not in use
-		subprocess.call("modprobe -r g_multi", shell=True)
-
-		# Create mount point if it doesn't exist
-		if not os.path.exists(MOUNT_POINT):
-    			os.makedirs(MOUNT_POINT)
-		# Make sure the update partition is not mounted
-		else:
-			unmount_update_filesystem()
-
-		# Mount update partition
-		result = subprocess.call("mount -o loop,offset=1048576 /dev/disk/by-partlabel/update " + MOUNT_POINT, shell=True)
-		if(result != 0):
-			print "Error: Unable to mount update partition."
+		# Verification
+		if not verify("Are you sure you would like to update this device (** ALL DATA WILL BE LOST **) ?"):
 			update_file.close()
+			unmount_update_partition()
+			print "\nCancelled\n"
 			sys.exit(1)
 
 		# Create update directory if it doesn't exist
@@ -167,7 +227,7 @@ if __name__ == '__main__':
 		# Create backup if necessary
 		if len(os.listdir(UPDATE_DESTINATION)) > 0:
 
-			print "Backing up current image files..."
+			print "\nBacking up current image files..."
 			
 			# Create backup directory
 			if not os.path.exists(BACKUP_DESTINATION):
@@ -180,22 +240,22 @@ if __name__ == '__main__':
         				shutil.copy(full_file_name, BACKUP_DESTINATION)
 
 		# Extract update file
-		print "Extracting update files..."
+		print "\nExtracting update files..."
 		update_file.extractall(path=UPDATE_DESTINATION)
 		
 		# Set system to flash image on reboot
 		result = subprocess.call("fw_setenv bootargs_mode recovery", shell=True)
 		if(result != 0):
-			print "Error: Unable to configure device to flash new image."
+			print "\nError: Unable to configure device.\n"
 			update_file.close()
-			unmount_update_filesystem()
+			unmount_update_partition()
 			sys.exit(1)
 			
 		update_file.close()
-		unmount_update_filesystem()
+		unmount_update_partition()
 
 		# Reboot device
-		print "\nThe device will now reboot and begin flashing the new image."
+		print "\nThe device will now reboot and begin flashing."
 		print "** DO NOT unplug or disturb the device until flashing is complete **"
 		time.sleep(5)
 		os.system("reboot")
@@ -205,5 +265,74 @@ if __name__ == '__main__':
 	# Recovery
 	#
 
-	#elif sys.argv[1] == "restore":
+	elif sys.argv[1] == "restore":
+
+		print "\nRestore Device Firmware\n=======================\n"
+
+		# Verification
+		if not verify("Are you sure you want to restore this device from recovery files (** ALL DATA WILL BE LOST **) ?"):
+			print "\nCancelled\n"
+			sys.exit(1)
+
+		# Set system to flash image on reboot
+		result = subprocess.call("fw_setenv bootargs_mode recovery", shell=True)
+		if(result != 0):
+			print "\nError: Unable to configure device.\n"
+			update_file.close()
+			unmount_update_partition()
+			sys.exit(1)
+
+		# Reboot device
+		print "\nThe device will now reboot and begin flashing."
+		print "** DO NOT unplug or disturb the device until flashing is complete **"
+		time.sleep(5)
+		os.system("reboot")
+
+	#
+	# Revert
+	#
+
+	elif sys.argv[1] == "revert":
+		
+		print "\nRevert Device Firmware Update\n=======================\n"
+
+		# Mount update partition
+		if not mount_update_partition():
+			print "\nError: Unable to mount update partition.\n"
+			sys.exit(1)
+
+		# Check backup files
+		print "Checking backup files..."
+		if not is_backup_available():
+			print "\nError: No backup files found. Unable to revert to previous firmware.\n"
+			unmount_update_partition()
+			sys.exit(1)
+
+		# Verification
+		if not verify("Are you sure you want to restore this device from backup files (** ALL DATA WILL BE LOST **) ?"):
+			print "\nCancelled\n"
+			unmount_update_partition()
+			sys.exit(1)
+
+		# Copy backup files to update path
+		print "\nPreparing backup files..."
+		backup_files = os.listdir(BACKUP_DESTINATION)
+		for file_name in backup_files:
+    			full_file_name = os.path.join(BACKUP_DESTINATION, file_name)
+    			if (os.path.isfile(full_file_name)):
+        			shutil.copy(full_file_name, UPDATE_DESTINATION)
+
+		# Set system to flash image on reboot
+		result = subprocess.call("fw_setenv bootargs_mode recovery", shell=True)
+		if(result != 0):
+			print "\nError: Unable to configure device.\n"
+			update_file.close()
+			unmount_update_partition()
+			sys.exit(1)
+
+		# Reboot device
+		print "\nThe device will now reboot and begin flashing."
+		print "** DO NOT unplug or disturb the device until flashing is complete **"
+		time.sleep(5)
+		os.system("reboot")
 
