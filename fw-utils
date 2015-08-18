@@ -196,7 +196,7 @@ if __name__ == '__main__':
 				unmount_update_partition()
 				sys.exit(1)
 
-		print "Checking update file..."
+		print "\nChecking update file..."
 			
 		# Check we are working with a valid update file
 		if not tarfile.is_tarfile(update_path):
