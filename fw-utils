@@ -3,7 +3,7 @@
 #
 # Written by Scott Ware
 #
-# Version 0.0.1
+# Version 0.0.2
 #
 
 import gobject
@@ -47,7 +47,7 @@ def is_supported_platform():
     	platform = platform_file.readline()
     	platform_file.close()
 	
-	if platform in ['BODEGA BAY', 'SALT BAY']:
+	if platform in ['BODEGA BAY\n', 'SALT BAY\n']:
     		return True
 
     	return False
