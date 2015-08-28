@@ -145,10 +145,10 @@ def unmount_update_partition():
 
 def print_usage():
 	print "\nUsage:\n"
-	print "fw-utils update [URL\FILEPATH]: Flash an update image to the device. If no url/path is specified the update partition will be scanned for update files."
-	print "fw-utils restore: Restore the device to factory defaults."
-	print "fw-utils revert: Flash the previous image back onto the device."
-	print "fw-utils help: Prints this usage guide."
+	print "fw-utils update [URL\FILEPATH]: Flash an update image to the device. If no url/path is specified the update partition will be scanned for update files.\n"
+	print "fw-utils restore: Restore the device to factory defaults.\n"
+	print "fw-utils revert: Flash the previous image back onto the device.\n"
+	print "fw-utils help: Prints this usage guide.\n"
 	sys.exit(1)
 
 if __name__ == '__main__':
