@@ -145,6 +145,7 @@ def unmount_update_partition():
 
 def print_usage():
 	print "\nUsage:\n"
+	print "-n: Do not ask the user for confirmation.\n"
 	print "fw-utils update [URL\FILEPATH]: Flash an update image to the device. If no url/path is specified the update partition will be scanned for update files.\n"
 	print "fw-utils restore: Restore the device to factory defaults.\n"
 	print "fw-utils revert: Flash the previous image back onto the device.\n"
@@ -152,11 +153,20 @@ def print_usage():
 	sys.exit(1)
 
 if __name__ == '__main__':
-	if len(sys.argv) == 2 and sys.argv[1] == "help":
+	offset = 0
+	confirm = True
+
+	# Check flags
+	for arg in sys.argv:
+		if arg == "-n":
+			confirm = False
+			offset = offset + 1
+
+	if (len(sys.argv) < (offset + 2)):
+		print "Please specify a command!"
 		print_usage()
 
-	if (len(sys.argv) < 2):
-		print "Please specify a command!"
+	if sys.argv[offset + 1] == "help":
 		print_usage()
 		
 	# Check Platform
@@ -170,7 +180,7 @@ if __name__ == '__main__':
 	# Update
 	#
 
-	if sys.argv[1] == "update":
+	if sys.argv[offset + 1] == "update":
 		
 		print "\nUpdate Device Firmware\n=======================\n"
 
@@ -180,7 +190,7 @@ if __name__ == '__main__':
 			sys.exit(1)
 
 		# Check for url/path argument
-		if (len(sys.argv) < 3):
+		if (len(sys.argv) < (offset + 3)):
 			update_path = get_update_file()
 			if update_path is None:
 				print "\nError: No update file found or url/path specified!\n"
@@ -188,10 +198,10 @@ if __name__ == '__main__':
 				sys.exit(1)
 
 		# Check URL/File
-		elif os.path.isfile(sys.argv[2]):
-			update_path = os.path.abspath(sys.argv[2])
+		elif os.path.isfile(sys.argv[offset + 2]):
+			update_path = os.path.abspath(sys.argv[offset + 2])
 		else:
-			update_path = download_file(sys.argv[2])
+			update_path = download_file(sys.argv[offset + 2])
 			if update_path is None:
 				unmount_update_partition()
 				sys.exit(1)
@@ -214,11 +224,12 @@ if __name__ == '__main__':
 			sys.exit(1)
 
 		# Verification
-		if not verify("Are you sure you would like to update this device (** ALL DATA WILL BE LOST **) ?"):
-			update_file.close()
-			unmount_update_partition()
-			print "\nCancelled\n"
-			sys.exit(1)
+		if confirm:
+			if not verify("Are you sure you would like to update this device (** ALL DATA WILL BE LOST **) ?"):
+				update_file.close()
+				unmount_update_partition()
+				print "\nCancelled\n"
+				sys.exit(1)
 
 		# Create update directory if it doesn't exist
 		if not os.path.exists(UPDATE_DESTINATION):
@@ -265,14 +276,15 @@ if __name__ == '__main__':
 	# Recovery
 	#
 
-	elif sys.argv[1] == "restore":
+	elif sys.argv[offset + 1] == "restore":
 
 		print "\nRestore Device Firmware\n=======================\n"
 
 		# Verification
-		if not verify("Are you sure you want to restore this device from recovery files (** ALL DATA WILL BE LOST **) ?"):
-			print "\nCancelled\n"
-			sys.exit(1)
+		if confirm:
+			if not verify("Are you sure you want to restore this device from recovery files (** ALL DATA WILL BE LOST **) ?"):
+				print "\nCancelled\n"
+				sys.exit(1)
 
 		# Set system to flash image on reboot
 		result = subprocess.call("fw_setenv bootargs_mode recovery", shell=True)
@@ -292,7 +304,7 @@ if __name__ == '__main__':
 	# Revert
 	#
 
-	elif sys.argv[1] == "revert":
+	elif sys.argv[offset + 1] == "revert":
 		
 		print "\nRevert Device Firmware Update\n=======================\n"
 
@@ -309,10 +321,11 @@ if __name__ == '__main__':
 			sys.exit(1)
 
 		# Verification
-		if not verify("Are you sure you want to restore this device from backup files (** ALL DATA WILL BE LOST **) ?"):
-			print "\nCancelled\n"
-			unmount_update_partition()
-			sys.exit(1)
+		if confirm:
+			if not verify("Are you sure you want to restore this device from backup files (** ALL DATA WILL BE LOST **) ?"):
+				print "\nCancelled\n"
+				unmount_update_partition()
+				sys.exit(1)
 
 		# Copy backup files to update path
 		print "\nPreparing backup files..."
@@ -335,4 +348,9 @@ if __name__ == '__main__':
 		print "** DO NOT unplug or disturb the device until flashing is complete **"
 		time.sleep(5)
 		os.system("reboot")
+
+	# Unknown
+	else:
+		print "Command not recognised!"
+		print_usage()
 
